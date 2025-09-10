@@ -1,0 +1,207 @@
+import os
+import base64
+from io import BytesIO
+from PIL import Image
+from fastapi import FastAPI, HTTPException
+import requests
+from transformers import pipeline
+from ultralytics import YOLO
+import uvicorn
+import pydantic
+import gradio as gr
+import threading
+import logging
+import numpy as np
+
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize models
+food_classifier = pipeline("image-classification", model="nateraw/food")
+yolo_model = YOLO("yolov8n.pt")
+
+# USDA API configuration
+USDA_API_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
+USDA_API_KEY = os.getenv("USDA_API_KEY", "qktfia6caeuBSww2A5SYns8NaLlE2OuozHaEASzw")
+
+# FastAPI app
+app = FastAPI()
+
+# Pydantic model for request body
+class ImageRequest(pydantic.BaseModel):
+    image: str  # Base64-encoded image
+    portion_size: float = 100.0  # Default portion size in grams
+
+# Helper function to decode base64 image
+def decode_base64_image(base64_string):
+    try:
+        img_data = base64.b64decode(base64_string)
+        img = Image.open(BytesIO(img_data)).convert("RGB")
+        return img
+    except Exception as e:
+        logger.error(f"Image decoding failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid base64 image")
+
+# Helper function to crop image around detected food or container
+def crop_image_to_food(img, yolo_results, food_labels=["chicken_curry", "pizza", "salad", "lasagna", "risotto"], container_labels=["bowl", "plate", "dish"]):
+    try:
+        # Prioritize food labels first
+        for result in yolo_results:
+            for box, cls in zip(result.boxes.xyxy, result.boxes.cls):
+                label = result.names[int(cls)]
+                if label in food_labels:
+                    x1, y1, x2, y2 = map(int, box)
+                    cropped_img = img.crop((x1, y1, x2, y2))
+                    logger.info(f"Cropped image to food {label} at coordinates: ({x1}, {y1}, {x2}, {y2})")
+                    return cropped_img, True
+        # Fallback to container labels
+        for result in yolo_results:
+            for box, cls in zip(result.boxes.xyxy, result.boxes.cls):
+                label = result.names[int(cls)]
+                if label in container_labels:
+                    x1, y1, x2, y2 = map(int, box)
+                    cropped_img = img.crop((x1, y1, x2, y2))
+                    logger.info(f"Cropped image to container {label} at coordinates: ({x1}, {y1}, {x2}, {y2})")
+                    return cropped_img, True
+        logger.info("No food or container detected for cropping")
+        return img, False
+    except Exception as e:
+        logger.error(f"Cropping failed: {str(e)}")
+        return img, False
+
+# Helper function to calculate nutrients using USDA API
+def calculate_nutrients(food_items, portion_size):
+    nutrients = {"protein": 0, "carbs": 0, "fat": 0, "fiber": 0, "sodium": 0}
+    micronutrients = {"vitamin_c": 0, "calcium": 0, "iron": 0}
+    top_food = max(food_items, key=food_items.get, default=None)
+    if not top_food:
+        logger.warning("No food items detected for nutrient calculation")
+        return nutrients, micronutrients, 0
+
+    # Replace underscores with spaces for USDA API query
+    query_food = top_food.replace("_", " ")
+    logger.info(f"Querying USDA API for: {query_food}")
+
+    try:
+        response = requests.get(USDA_API_URL, params={
+            "api_key": USDA_API_KEY,
+            "query": query_food,
+            "pageSize": 1
+        })
+        response.raise_for_status()
+        data = response.json()
+        logger.debug(f"USDA API response: {data}")
+
+        if not data.get("foods"):
+            logger.warning(f"No food data found for {query_food}")
+            return nutrients, micronutrients, 0
+
+        food_data = data["foods"][0]
+        food_nutrients = {n["nutrientName"]: n["value"] for n in food_data["foodNutrients"]}
+
+        nutrients = {
+            "protein": food_nutrients.get("Protein", 0) * (portion_size / 100),
+            "carbs": food_nutrients.get("Carbohydrate, by difference", 0) * (portion_size / 100),
+            "fat": food_nutrients.get("Total lipid (fat)", 0) * (portion_size / 100),
+            "fiber": food_nutrients.get("Fiber, total dietary", 0) * (portion_size / 100),
+            "sodium": food_nutrients.get("Sodium, Na", 0) * (portion_size / 100),
+        }
+        micronutrients = {
+            "vitamin_c": food_nutrients.get("Vitamin C, total ascorbic acid", 0) * (portion_size / 100),
+            "calcium": food_nutrients.get("Calcium, Ca", 0) * (portion_size / 100),
+            "iron": food_nutrients.get("Iron, Fe", 0) * (portion_size / 100),
+        }
+        calories = (nutrients["protein"] * 4) + (nutrients["carbs"] * 4) + (nutrients["fat"] * 9)
+        logger.info(f"Nutrients calculated: {nutrients}, Calories: {calories}")
+        return nutrients, micronutrients, calories
+    except requests.exceptions.RequestException as e:
+        logger.error(f"USDA API request failed: {str(e)}")
+        return nutrients, micronutrients, 0
+
+# FastAPI endpoint for food analysis
+@app.post("/analyze_food")
+async def analyze_food(request: ImageRequest):
+    try:
+        # Decode image
+        img = decode_base64_image(request.image)
+
+        # Run YOLO to detect objects and crop to food or container
+        yolo_results = yolo_model(img)
+        cropped_img, was_cropped = crop_image_to_food(img, yolo_results)
+        
+        # Food classification on cropped image
+        food_results = food_classifier(cropped_img)
+        food_items = {r["label"]: r["score"] for r in food_results if r["score"] >= 0.3}  # Increased threshold
+        logger.info(f"Food items detected: {food_items}")
+
+        # Non-food detection on original image
+        non_food_items = [r.names[int(cls)] for r in yolo_results for cls in r.boxes.cls if r.names[int(cls)] not in food_items]
+        is_non_food = len(non_food_items) > len(food_items) and max(food_items.values(), default=0) < 0.5
+        logger.info(f"Non-food items: {non_food_items}, is_non_food: {is_non_food}")
+
+        # Nutrient analysis
+        nutrients, micronutrients, calories = calculate_nutrients(food_items, request.portion_size)
+
+        # Simplified ingredient inference
+        ingredient_map = {
+            "pizza": ["dough", "tomato sauce", "cheese"],
+            "salad": ["lettuce", "tomato", "cucumber"],
+            "chicken_curry": ["chicken", "curry sauce", "spices"],
+            "lasagna": ["pasta", "tomato sauce", "cheese", "meat"],
+            "risotto": ["rice", "broth", "parmesan"]
+        }
+        ingredients = [
+            {"name": food, "probability": prob, "subclasses": ingredient_map.get(food.lower(), [])}
+            for food, prob in food_items.items()
+        ]
+
+        return {
+            "is_non_food": is_non_food,
+            "non_food_items": non_food_items,
+            "food_items": food_items,
+            "ingredients": ingredients,
+            "nutrients": nutrients,
+            "macronutrients": {
+                "protein": {"value": nutrients["protein"], "unit": "g"},
+                "carbs": {"value": nutrients["carbs"], "unit": "g"},
+                "fat": {"value": nutrients["fat"], "unit": "g"},
+            },
+            "micronutrients": micronutrients,
+            "calories": calories,
+            "source": "huggingface",
+            "was_cropped": was_cropped
+        }
+    except Exception as e:
+        logger.error(f"Analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Gradio interface for testing
+async def gradio_analyze(image):
+    try:
+        # Convert Gradio image to base64
+        buffered = BytesIO()
+        image.save(buffered, format="JPEG")
+        base64_image = base64.b64encode(buffered.getvalue()).decode()
+        # Create request object
+        request = ImageRequest(image=base64_image, portion_size=100.0)
+        # Call FastAPI endpoint logic directly
+        return await analyze_food(request)
+    except Exception as e:
+        return {"error": str(e)}
+
+# Gradio interface
+iface = gr.Interface(
+    fn=gradio_analyze,
+    inputs=gr.Image(type="pil"),
+    outputs="json",
+    title="Food Analysis API",
+    description="Upload an image to analyze food items, non-food items, and nutritional content."
+)
+
+# Run both FastAPI and Gradio
+if __name__ == "__main__":
+    # Start FastAPI server in a separate thread
+    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=8000)).start()
+    # Start Gradio interface
+    iface.launch(server_name="0.0.0.0", server_port=7860, share=True) 

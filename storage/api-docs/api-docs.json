@@ -1,0 +1,320 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "NutriSnap API",
+        "description": "API for NutriSnap widget to analyze food photos",
+        "contact": {
+            "email": "support@bincone.apexjets.org"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "https://bincone.apexjets.org/api"
+        }
+    ],
+    "paths": {
+        "/seller/register": {
+            "post": {
+                "tags": [
+                    "Seller"
+                ],
+                "summary": "Register a new seller",
+                "description": "Creates a new seller account and returns an API token",
+                "operationId": "registerSeller",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password",
+                                    "name"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "yourpassword"
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "example": "User Name"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful registration",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "token": {
+                                            "type": "string",
+                                            "example": "your-api-token"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                }
+            }
+        },
+        "/seller/login": {
+            "post": {
+                "tags": [
+                    "Seller"
+                ],
+                "summary": "Login a seller",
+                "description": "Authenticates a seller and returns an API token",
+                "operationId": "loginSeller",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "yourpassword"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful login",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "token": {
+                                            "type": "string",
+                                            "example": "your-api-token"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/seller/analyze-photo": {
+            "post": {
+                "tags": [
+                    "Photo Analysis"
+                ],
+                "summary": "Analyze a food photo",
+                "description": "Uploads a food photo for analysis and returns a result ID",
+                "operationId": "analyzePhoto",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "photo",
+                                    "product_id"
+                                ],
+                                "properties": {
+                                    "photo": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "product_id": {
+                                        "type": "string",
+                                        "example": "123"
+                                    },
+                                    "meal_id": {
+                                        "type": "string",
+                                        "example": "456"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful analysis",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "result_id": {
+                                            "type": "string",
+                                            "example": "789"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/seller/analyze-leftover": {
+            "post": {
+                "tags": [
+                    "Photo Analysis"
+                ],
+                "summary": "Analyze a leftover food photo",
+                "description": "Uploads a leftover food photo for analysis and returns a result ID",
+                "operationId": "analyzeLeftoverPhoto",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "photo",
+                                    "product_id"
+                                ],
+                                "properties": {
+                                    "photo": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "product_id": {
+                                        "type": "string",
+                                        "example": "123"
+                                    },
+                                    "meal_id": {
+                                        "type": "string",
+                                        "example": "456"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful analysis",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "result_id": {
+                                            "type": "string",
+                                            "example": "789"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/seller/analysis-results/{id}": {
+            "get": {
+                "tags": [
+                    "Photo Analysis"
+                ],
+                "summary": "Get analysis results",
+                "description": "Retrieves the results of a photo analysis by ID",
+                "operationId": "getResults",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful retrieval",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "results": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Result not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Seller",
+            "description": "Seller"
+        },
+        {
+            "name": "Photo Analysis",
+            "description": "Photo Analysis"
+        }
+    ]
+}
